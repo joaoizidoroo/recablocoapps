@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="msapplication-tap-highlight" content="no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Alarme App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        #clock { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md mx-auto">
+        <div class="bg-gray-800 p-6 rounded-2xl shadow-lg mb-6 text-center">
+            <h1 id="clock" class="text-6xl md:text-7xl font-bold text-gray-100 tracking-widest">00:00:00</h1>
+            <p id="date" class="text-lg text-gray-400 mt-2">A carregar...</p>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-2xl shadow-lg mb-6">
+            <h2 class="text-xl font-bold mb-4 text-center text-red-400">Novo Alarme</h2>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <input type="time" id="alarm-time" class="bg-gray-700 border-2 border-gray-600 text-white text-lg rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-3" required>
+                <input type="text" id="alarm-label" class="bg-gray-700 border-2 border-gray-600 text-white text-lg rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-3" placeholder="Descrição (ex: Acordar)">
+            </div>
+            <button id="add-alarm-btn" class="mt-4 w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105">Adicionar Alarme</button>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-2xl shadow-lg">
+            <h2 class="text-xl font-bold mb-4 text-center text-red-400">Alarmes Ativos</h2>
+            <div id="alarms-list" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <script src="cordova.js"></script>
+    <script>
+    function onDeviceReady() {
+        const clockElement = document.getElementById('clock');
+        const dateElement = document.getElementById('date');
+        const alarmTimeInput = document.getElementById('alarm-time');
+        const alarmLabelInput = document.getElementById('alarm-label');
+        const addAlarmBtn = document.getElementById('add-alarm-btn');
+        const alarmsList = document.getElementById('alarms-list');
+
+        let alarms = JSON.parse(localStorage.getItem('alarms')) || [];
+        let alarmInterval = null;
+
+        function updateClock() {
+            const now = new Date();
+            clockElement.textContent = now.toLocaleTimeString('pt-BR');
+            const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            dateElement.textContent = now.toLocaleDateString('pt-BR', dateOptions);
+        }
+
+        function renderAlarms() {
+            alarmsList.innerHTML = '';
+            if (alarms.length === 0) {
+                alarmsList.innerHTML = '<p class="text-gray-500 text-center">Nenhum alarme definido.</p>';
+                return;
+            }
+            alarms.sort((a, b) => a.time.localeCompare(b.time)).forEach(alarm => {
+                const alarmElement = document.createElement('div');
+                alarmElement.className = 'bg-gray-700 p-4 rounded-lg flex justify-between items-center';
+                alarmElement.innerHTML = `
+                    <div>
+                        <p class="text-2xl font-mono">${alarm.time}</p>
+                        <p class="text-sm text-gray-400">${alarm.label}</p>
+                    </div>
+                    <button data-id="${alarm.id}" class="remove-alarm-btn text-red-400 hover:text-red-300 font-bold py-2 px-4 rounded-lg">&times;</button>
+                `;
+                alarmsList.appendChild(alarmElement);
+            });
+        }
+
+        function checkAlarms() {
+            const now = new Date();
+            const currentTime = now.toTimeString().slice(0, 5); // Formato HH:MM
+
+            alarms.forEach(alarm => {
+                if (alarm.time === currentTime && !alarm.triggered) {
+                    // Previne que o alarme toque várias vezes no mesmo minuto
+                    alarm.triggered = true; 
+                    
+                    navigator.notification.alert(
+                        alarm.label,
+                        () => { // Callback
+                            alarm.triggered = false; // Resetar para o dia seguinte
+                            cordova.plugins.badge.clear();
+                        },
+                        '🚨 Alarme a Tocar! 🚨',
+                        'OK'
+                    );
+                    navigator.vibrate([1000, 500, 1000, 500, 2000]); // Vibrar
+                    cordova.plugins.badge.set(1); // Notificação no ícone
+                } else if (alarm.time !== currentTime) {
+                    alarm.triggered = false; // Resetar se o tempo já passou
+                }
+            });
+        }
+
+        addAlarmBtn.addEventListener('click', () => {
+            const time = alarmTimeInput.value;
+            const label = alarmLabelInput.value || 'Alarme';
+            if (!time) return navigator.notification.alert('Por favor, defina uma hora.', null, 'Erro', 'OK');
+            
+            const newAlarm = { id: Date.now(), time, label, triggered: false };
+            alarms.push(newAlarm);
+            localStorage.setItem('alarms', JSON.stringify(alarms));
+            
+            renderAlarms();
+            navigator.notification.alert('Alarme adicionado!', null, 'Sucesso', 'OK');
+        });
+
+        alarmsList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('remove-alarm-btn')) {
+                const id = parseInt(e.target.dataset.id, 10);
+                alarms = alarms.filter(alarm => alarm.id !== id);
+                localStorage.setItem('alarms', JSON.stringify(alarms));
+                renderAlarms();
+            }
+        });
+
+        // --- INICIALIZAÇÃO ---
+        setInterval(updateClock, 1000);
+        updateClock();
+        renderAlarms();
+
+        // Limpa o badge ao abrir o app
+        cordova.plugins.badge.clear();
+        
+        // Inicia o verificador de alarmes. Isto vai correr enquanto o app estiver aberto.
+        // O desafio de correr em background sem plugins pagos é grande, mas esta é a abordagem mais próxima.
+        if (alarmInterval) clearInterval(alarmInterval);
+        alarmInterval = setInterval(checkAlarms, 15000); // Verifica a cada 15 segundos
+    }
+
+    document.addEventListener('deviceready', onDeviceReady, false);
+    </script>
+</body>
+</html>
+
+
